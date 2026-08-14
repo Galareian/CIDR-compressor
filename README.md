@@ -1,6 +1,6 @@
 # CIDR-compressor
 
-![CIDR-compressor](assets/hero.png)
+![CIDR-compressor](assets/hero-text.png)
 
 CIDR-compressor is a simple command-line tool (written in C) that takes a
 list of individual IPs and CIDR ranges and compresses them into the smallest
