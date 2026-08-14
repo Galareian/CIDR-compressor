@@ -16,8 +16,10 @@ typedef struct NodePool {
     size_t capacity;
 } NodePool;
 
+enum { INITIAL_NODE_CAPACITY = 65536 };
+
 /* Child index zero means "no child", so leave it unused. */
-static NodePool pool = {.count = 1};
+static NodePool pool = {.count = 1, .capacity = INITIAL_NODE_CAPACITY};
 
 static Node *node_at(uint32_t index) {
     return &pool.nodes[index];
