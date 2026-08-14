@@ -14,7 +14,7 @@ CC_arm64 := aarch64-linux-gnu-gcc
 CC_armv7 := arm-linux-gnueabihf-gcc
 PORTABLE_TARGETS := $(ARCHES:%=dist/%/cidr-compressor)
 
-.PHONY: all build clean run test help
+.PHONY: all build clean run test stress-test help
 
 all: $(TARGET)
 
@@ -44,6 +44,9 @@ run: $(TARGET)
 test: $(TARGET)
 	./tests/test.sh $(TARGET)
 
+stress-test: $(TARGET)
+	./tests/stress.sh $(TARGET)
+
 clean:
 	rm -rf bin build dist
 
@@ -54,5 +57,6 @@ help:
 		'  build  Build x86_64, ARM64, and ARMv7 binaries under dist/' \
 		'  run    Run it; pass input with ARGS=path/to/input.txt' \
 		'  test   Run the test suite' \
+		'  stress-test  Run million-entry IPv4, IPv6, and mixed tests' \
 		'  clean  Remove build artifacts' \
 		'  help   Show this help message'
