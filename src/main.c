@@ -111,47 +111,71 @@ static void insert(uint32_t root, const unsigned char address[16], int bits) {
 /* Compact bottom-up and return whether this subtree is completely covered. */
 typedef struct CompactResult {
     int full;
-    size_t entries;
 } CompactResult;
 
-static CompactResult compact(uint32_t index) {
+typedef struct OutputEntry {
+    unsigned char address[16];
+    int depth;
+} OutputEntry;
+
+typedef struct OutputList {
+    OutputEntry *entries;
+    size_t count;
+    size_t capacity;
+} OutputList;
+
+static void append_output(OutputList *output, const unsigned char address[16],
+                          int depth) {
+    if (output->count == output->capacity) {
+        size_t capacity = output->capacity ? output->capacity * 2 : 1024;
+        OutputEntry *entries = realloc(output->entries,
+                                       capacity * sizeof(*entries));
+        if (!entries) {
+            perror("realloc");
+            exit(EXIT_FAILURE);
+        }
+        output->entries = entries;
+        output->capacity = capacity;
+    }
+    memcpy(output->entries[output->count].address, address, 16);
+    output->entries[output->count++].depth = depth;
+}
+
+static CompactResult compact(uint32_t index, unsigned char address[16],
+                             int depth, OutputList *output) {
     CompactResult left, right;
     Node *node;
+    size_t output_start = output->count;
 
-    if (!index) return (CompactResult){0, 0};
+    if (!index) return (CompactResult){0};
     node = node_at(index);
-    if (node->terminal) return (CompactResult){1, 1};
+    if (node->terminal) {
+        append_output(output, address, depth);
+        return (CompactResult){1};
+    }
 
-    left = compact(node->child[0]);
-    right = compact(node->child[1]);
+    left = compact(node->child[0], address, depth + 1, output);
+    address[depth / 8] |= (unsigned char)(1u << (7 - depth % 8));
+    right = compact(node->child[1], address, depth + 1, output);
+    address[depth / 8] &= (unsigned char)~(1u << (7 - depth % 8));
     if (left.full && right.full) {
         node->terminal = 1;
         node->child[0] = node->child[1] = 0;
-        return (CompactResult){1, 1};
+        output->count = output_start;
+        append_output(output, address, depth);
+        return (CompactResult){1};
     }
-    return (CompactResult){0, left.entries + right.entries};
+    return (CompactResult){0};
 }
 
-static void print_tree(uint32_t index, unsigned char address[16], int depth,
-                       int max_bits) {
+static void print_outputs(const OutputList *output, int max_bits) {
     char text[INET6_ADDRSTRLEN];
-    Node *node;
-    if (!index) return;
-    node = node_at(index);
-    if (node->terminal) {
-        if (inet_ntop(max_bits == 32 ? AF_INET : AF_INET6, address, text,
+    for (size_t index = 0; index < output->count; index++) {
+        const OutputEntry *entry = &output->entries[index];
+        if (inet_ntop(max_bits == 32 ? AF_INET : AF_INET6, entry->address, text,
                       sizeof(text))) {
-            if (depth == max_bits) printf("%s\n", text);
-            else printf("%s/%d\n", text, depth);
-        }
-        return;
-    }
-
-    for (int branch = 0; branch < 2; branch++) {
-        if (node->child[branch]) {
-            if (branch) address[depth / 8] |= (unsigned char)(1u << (7 - depth % 8));
-            print_tree(node->child[branch], address, depth + 1, max_bits);
-            if (branch) address[depth / 8] &= (unsigned char)~(1u << (7 - depth % 8));
+            if (entry->depth == max_bits) printf("%s\n", text);
+            else printf("%s/%d\n", text, entry->depth);
         }
     }
 }
@@ -165,6 +189,8 @@ int main(int argc, char **argv) {
     int stats = 0;
     size_t input_entries = 0;
     size_t output_entries;
+    OutputList ipv4_output = {0};
+    OutputList ipv6_output = {0};
 
     if (argc > 1 && strcmp(argv[1], "--stats") == 0) {
         stats = 1;
@@ -205,13 +231,15 @@ int main(int argc, char **argv) {
 
     if (ferror(input)) perror("read");
     if (input != stdin) fclose(input);
-    output_entries = compact(ipv4).entries + compact(ipv6).entries;
     {
         unsigned char address[16] = {0};
-        print_tree(ipv4, address, 0, 32);
+        compact(ipv4, address, 0, &ipv4_output);
         memset(address, 0, sizeof(address));
-        print_tree(ipv6, address, 0, 128);
+        compact(ipv6, address, 0, &ipv6_output);
     }
+    output_entries = ipv4_output.count + ipv6_output.count;
+    print_outputs(&ipv4_output, 32);
+    print_outputs(&ipv6_output, 128);
     if (stats) {
         double reduction = input_entries
                                ? 100.0 * (1.0 - (double)output_entries / input_entries)
@@ -219,6 +247,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "input entries: %zu\noutput entries: %zu\ncompression: %.2f%%\n",
                 input_entries, output_entries, reduction);
     }
+    free(ipv4_output.entries);
+    free(ipv6_output.entries);
     free_nodes();
     return EXIT_SUCCESS;
 }
