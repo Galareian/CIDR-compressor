@@ -14,7 +14,7 @@ CC_arm64 := aarch64-linux-gnu-gcc
 CC_armv7 := arm-linux-gnueabihf-gcc
 PORTABLE_TARGETS := $(ARCHES:%=dist/%/cidr-compressor)
 
-.PHONY: all build clean run test stress-test help
+.PHONY: all build clean run test stress-test performance help
 
 all: $(TARGET)
 
@@ -47,6 +47,9 @@ test: $(TARGET)
 stress-test: $(TARGET)
 	./tests/stress.sh $(TARGET)
 
+performance: $(TARGET)
+	./tests/performance.sh $(TARGET)
+
 clean:
 	rm -rf bin build dist
 
@@ -58,5 +61,6 @@ help:
 		'  run    Run it; pass input with ARGS=path/to/input.txt' \
 		'  test   Run the test suite' \
 		'  stress-test  Run million-entry IPv4, IPv6, and mixed tests' \
+		'  performance  Benchmark workloads and append averages to performance/performance.log' \
 		'  clean  Remove build artifacts' \
 		'  help   Show this help message'

@@ -20,5 +20,8 @@ build/
 # Private test inputs
 tests/private/
 
+# Local performance logs
+performance/
+
 # VSCode
 .vscode/
