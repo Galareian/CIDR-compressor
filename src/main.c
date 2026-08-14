@@ -74,8 +74,18 @@ static int parse_prefix(char *text, unsigned char address[16], int *bits,
     if (*bits > *max_bits) return 0;
     if (family == AF_INET) memset(address + 4, 0, 12);
 
-    for (int bit = *bits; bit < *max_bits; bit++)
-        address[bit / 8] &= (unsigned char)~(1u << (7 - bit % 8));
+    {
+        int byte = *bits / 8;
+        int remainder = *bits % 8;
+        int address_bytes = *max_bits / 8;
+
+        if (remainder) {
+            address[byte] &= (unsigned char)(0xffu << (8 - remainder));
+            byte++;
+        }
+        if (byte < address_bytes)
+            memset(address + byte, 0, (size_t)(address_bytes - byte));
+    }
     return family;
 }
 
