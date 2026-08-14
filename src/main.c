@@ -94,26 +94,28 @@ static void compact(Node *node) {
     }
 }
 
-static void print_tree(const Node *node, unsigned char address[16], int depth,
-                       int max_bits) {
+static size_t print_tree(const Node *node, unsigned char address[16], int depth,
+                         int max_bits) {
     char text[INET6_ADDRSTRLEN];
-    if (!node) return;
+    if (!node) return 0;
     if (node->terminal) {
         if (inet_ntop(max_bits == 32 ? AF_INET : AF_INET6, address, text,
                       sizeof(text))) {
             if (depth == max_bits) printf("%s\n", text);
             else printf("%s/%d\n", text, depth);
         }
-        return;
+        return 1;
     }
 
+    size_t count = 0;
     for (int branch = 0; branch < 2; branch++) {
         if (node->child[branch]) {
             if (branch) address[depth / 8] |= (unsigned char)(1u << (7 - depth % 8));
-            print_tree(node->child[branch], address, depth + 1, max_bits);
+            count += print_tree(node->child[branch], address, depth + 1, max_bits);
             if (branch) address[depth / 8] &= (unsigned char)~(1u << (7 - depth % 8));
         }
     }
+    return count;
 }
 
 int main(int argc, char **argv) {
@@ -122,9 +124,17 @@ int main(int argc, char **argv) {
     Node *ipv6 = new_node();
     char line[512];
     int line_number = 0;
+    int stats = 0;
+    size_t input_entries = 0;
+    size_t output_entries;
 
+    if (argc > 1 && strcmp(argv[1], "--stats") == 0) {
+        stats = 1;
+        argv++;
+        argc--;
+    }
     if (argc > 2) {
-        fprintf(stderr, "usage: %s [input-file]\n", argv[0]);
+        fprintf(stderr, "usage: %s [--stats] [input-file]\n", argv[0]);
         return EXIT_FAILURE;
     }
     if (argc == 2) {
@@ -151,6 +161,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "invalid address on line %d: %s\n", line_number, start);
             continue;
         }
+        input_entries++;
         insert(family == AF_INET ? ipv4 : ipv6, address, bits);
     }
 
@@ -160,9 +171,16 @@ int main(int argc, char **argv) {
     compact(ipv6);
     {
         unsigned char address[16] = {0};
-        print_tree(ipv4, address, 0, 32);
+        output_entries = print_tree(ipv4, address, 0, 32);
         memset(address, 0, sizeof(address));
-        print_tree(ipv6, address, 0, 128);
+        output_entries += print_tree(ipv6, address, 0, 128);
+    }
+    if (stats) {
+        double reduction = input_entries
+                               ? 100.0 * (1.0 - (double)output_entries / input_entries)
+                               : 0.0;
+        fprintf(stderr, "input entries: %zu\noutput entries: %zu\ncompression: %.2f%%\n",
+                input_entries, output_entries, reduction);
     }
     free_tree(ipv4);
     free_tree(ipv6);
