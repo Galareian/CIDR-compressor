@@ -7,8 +7,19 @@
 
 typedef struct Node {
     struct Node *child[2];
-    int terminal;
 } Node;
+
+/* A terminal node has no children, so reserve an impossible node pointer. */
+#define TERMINAL_NODE ((Node *)(uintptr_t)1)
+
+static int is_terminal(const Node *node) {
+    return node->child[0] == TERMINAL_NODE;
+}
+
+static void make_terminal(Node *node) {
+    node->child[0] = TERMINAL_NODE;
+    node->child[1] = NULL;
+}
 
 enum { NODE_CHUNK_SIZE = 4096 };
 
@@ -86,10 +97,9 @@ static void insert(Node *root, const unsigned char address[16], int bits) {
         int value = (address[bit / 8] >> (7 - bit % 8)) & 1;
         if (!node->child[value]) node->child[value] = new_node();
         node = node->child[value];
-        if (node->terminal) return;
+        if (is_terminal(node)) return;
     }
-    node->terminal = 1;
-    node->child[0] = node->child[1] = NULL;
+    make_terminal(node);
 }
 
 /* Compact bottom-up and return whether this subtree is completely covered. */
@@ -97,13 +107,12 @@ static int compact(Node *node) {
     int left_full, right_full;
 
     if (!node) return 0;
-    if (node->terminal) return 1;
+    if (is_terminal(node)) return 1;
 
     left_full = compact(node->child[0]);
     right_full = compact(node->child[1]);
     if (left_full && right_full) {
-        node->child[0] = node->child[1] = NULL;
-        node->terminal = 1;
+        make_terminal(node);
         return 1;
     }
     return 0;
@@ -113,7 +122,7 @@ static size_t print_tree(const Node *node, unsigned char address[16], int depth,
                          int max_bits) {
     char text[INET6_ADDRSTRLEN];
     if (!node) return 0;
-    if (node->terminal) {
+    if (is_terminal(node)) {
         if (inet_ntop(max_bits == 32 ? AF_INET : AF_INET6, address, text,
                       sizeof(text))) {
             if (depth == max_bits) printf("%s\n", text);
