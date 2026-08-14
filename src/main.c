@@ -6,57 +6,40 @@
 #include <string.h>
 
 typedef struct Node {
-    struct Node *child[2];
+    uint32_t child[2];
+    uint8_t terminal;
 } Node;
 
-/*
- * A terminal node has no children, so reserve an impossible node pointer.
- * TERMINAL_NODE is a marker only: it must never be dereferenced. All node
- * access goes through is_terminal() or make_terminal() to preserve this
- * representation invariant.
- */
-#define TERMINAL_NODE ((Node *)(uintptr_t)1)
+typedef struct NodePool {
+    Node *nodes;
+    size_t count;
+    size_t capacity;
+} NodePool;
 
-static int is_terminal(const Node *node) {
-    return node->child[0] == TERMINAL_NODE;
+/* Child index zero means "no child", so leave it unused. */
+static NodePool pool = {.count = 1};
+
+static Node *node_at(uint32_t index) {
+    return &pool.nodes[index];
 }
 
-static void make_terminal(Node *node) {
-    node->child[0] = TERMINAL_NODE;
-    node->child[1] = NULL;
-}
-
-enum { NODE_CHUNK_SIZE = 4096 };
-
-typedef struct NodeChunk {
-    Node nodes[NODE_CHUNK_SIZE];
-    size_t used;
-    struct NodeChunk *next;
-} NodeChunk;
-
-static NodeChunk *node_chunks;
-
-static Node *new_node(void) {
-    NodeChunk *chunk = node_chunks;
-
-    if (!chunk || chunk->used == NODE_CHUNK_SIZE) {
-        chunk = calloc(1, sizeof(*chunk));
-        if (!chunk) {
-            perror("calloc");
+static uint32_t new_node(void) {
+    if (!pool.nodes || pool.count == pool.capacity) {
+        size_t capacity = pool.capacity ? pool.capacity * 2 : 1024;
+        Node *nodes = realloc(pool.nodes, capacity * sizeof(*nodes));
+        if (!nodes) {
+            perror("realloc");
             exit(EXIT_FAILURE);
         }
-        chunk->next = node_chunks;
-        node_chunks = chunk;
+        pool.nodes = nodes;
+        pool.capacity = capacity;
     }
-    return &chunk->nodes[chunk->used++];
+    memset(&pool.nodes[pool.count], 0, sizeof(pool.nodes[pool.count]));
+    return (uint32_t)pool.count++;
 }
 
-static void free_node_chunks(void) {
-    while (node_chunks) {
-        NodeChunk *next = node_chunks->next;
-        free(node_chunks);
-        node_chunks = next;
-    }
+static void free_nodes(void) {
+    free(pool.nodes);
 }
 
 static int parse_prefix(char *text, unsigned char address[16], int *bits,
@@ -96,15 +79,23 @@ static int parse_prefix(char *text, unsigned char address[16], int *bits,
     return family;
 }
 
-static void insert(Node *root, const unsigned char address[16], int bits) {
-    Node *node = root;
+static void insert(uint32_t root, const unsigned char address[16], int bits) {
+    uint32_t index = root;
+    Node *node = node_at(root);
     for (int bit = 0; bit < bits; bit++) {
         int value = (address[bit / 8] >> (7 - bit % 8)) & 1;
-        if (!node->child[value]) node->child[value] = new_node();
-        node = node->child[value];
-        if (is_terminal(node)) return;
+        uint32_t child = node->child[value];
+        if (!child) {
+            child = new_node();
+            node = node_at(index);
+            node->child[value] = child;
+        }
+        index = child;
+        node = node_at(index);
+        if (node->terminal) return;
     }
-    make_terminal(node);
+    node->terminal = 1;
+    node->child[0] = node->child[1] = 0;
 }
 
 /* Compact bottom-up and return whether this subtree is completely covered. */
@@ -113,26 +104,31 @@ typedef struct CompactResult {
     size_t entries;
 } CompactResult;
 
-static CompactResult compact(Node *node) {
+static CompactResult compact(uint32_t index) {
     CompactResult left, right;
+    Node *node;
 
-    if (!node) return (CompactResult){0, 0};
-    if (is_terminal(node)) return (CompactResult){1, 1};
+    if (!index) return (CompactResult){0, 0};
+    node = node_at(index);
+    if (node->terminal) return (CompactResult){1, 1};
 
     left = compact(node->child[0]);
     right = compact(node->child[1]);
     if (left.full && right.full) {
-        make_terminal(node);
+        node->terminal = 1;
+        node->child[0] = node->child[1] = 0;
         return (CompactResult){1, 1};
     }
     return (CompactResult){0, left.entries + right.entries};
 }
 
-static void print_tree(const Node *node, unsigned char address[16], int depth,
+static void print_tree(uint32_t index, unsigned char address[16], int depth,
                        int max_bits) {
     char text[INET6_ADDRSTRLEN];
-    if (!node) return;
-    if (is_terminal(node)) {
+    Node *node;
+    if (!index) return;
+    node = node_at(index);
+    if (node->terminal) {
         if (inet_ntop(max_bits == 32 ? AF_INET : AF_INET6, address, text,
                       sizeof(text))) {
             if (depth == max_bits) printf("%s\n", text);
@@ -152,8 +148,8 @@ static void print_tree(const Node *node, unsigned char address[16], int depth,
 
 int main(int argc, char **argv) {
     FILE *input = stdin;
-    Node *ipv4 = new_node();
-    Node *ipv6 = new_node();
+    uint32_t ipv4 = new_node();
+    uint32_t ipv6 = new_node();
     char line[512];
     int line_number = 0;
     int stats = 0;
@@ -213,6 +209,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "input entries: %zu\noutput entries: %zu\ncompression: %.2f%%\n",
                 input_entries, output_entries, reduction);
     }
-    free_node_chunks();
+    free_nodes();
     return EXIT_SUCCESS;
 }
