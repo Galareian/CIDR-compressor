@@ -48,3 +48,25 @@ Example output (compressed):
 203.0.113.4
 2001:db8::1
 ```
+
+Inspiration
+-----------
+
+This project started with a practical need: I needed a small, dependable CIDR
+compressor for working with lists of IP addresses and ranges. Rather than
+reaching for another large dependency or treating the problem as a black box,
+I decided to revisit an idea I first encountered at university many years
+ago—the humble tree structure.
+
+There is something satisfying about seeing that old concept become useful
+again. CIDR ranges naturally form a hierarchy, and a tree provides an elegant
+way to walk that hierarchy, combine neighbouring networks, and reduce a long
+list of addresses to its simplest representation. What began as a utility for
+solving an immediate problem became a small exercise in reconnecting theory
+with practice.
+
+The result is intentionally straightforward: a focused command-line tool,
+written in C, that keeps the algorithm visible and the output useful. It is a
+little reminder that ideas learned years ago can remain quietly valuable—and
+that sometimes the best way to solve a modern problem is to dust off an old
+one.
