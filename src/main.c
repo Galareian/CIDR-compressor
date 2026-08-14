@@ -9,7 +9,12 @@ typedef struct Node {
     struct Node *child[2];
 } Node;
 
-/* A terminal node has no children, so reserve an impossible node pointer. */
+/*
+ * A terminal node has no children, so reserve an impossible node pointer.
+ * TERMINAL_NODE is a marker only: it must never be dereferenced. All node
+ * access goes through is_terminal() or make_terminal() to preserve this
+ * representation invariant.
+ */
 #define TERMINAL_NODE ((Node *)(uintptr_t)1)
 
 static int is_terminal(const Node *node) {
