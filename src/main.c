@@ -77,21 +77,23 @@ static void insert(Node *root, const unsigned char address[16], int bits) {
     node->child[0] = node->child[1] = NULL;
 }
 
-static int is_full(const Node *node) {
-    return node && (node->terminal ||
-                    (is_full(node->child[0]) && is_full(node->child[1])));
-}
+/* Compact bottom-up and return whether this subtree is completely covered. */
+static int compact(Node *node) {
+    int left_full, right_full;
 
-static void compact(Node *node) {
-    if (!node || node->terminal) return;
-    compact(node->child[0]);
-    compact(node->child[1]);
-    if (is_full(node->child[0]) && is_full(node->child[1])) {
+    if (!node) return 0;
+    if (node->terminal) return 1;
+
+    left_full = compact(node->child[0]);
+    right_full = compact(node->child[1]);
+    if (left_full && right_full) {
         free_tree(node->child[0]);
         free_tree(node->child[1]);
         node->child[0] = node->child[1] = NULL;
         node->terminal = 1;
+        return 1;
     }
+    return 0;
 }
 
 static size_t print_tree(const Node *node, unsigned char address[16], int depth,
