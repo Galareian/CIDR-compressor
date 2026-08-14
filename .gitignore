@@ -17,5 +17,8 @@ dist/
 bin/
 build/
 
+# Private test inputs
+tests/private/
+
 # VSCode
 .vscode/
