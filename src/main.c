@@ -8,6 +8,8 @@
 typedef struct Node {
     uint32_t child[2];
     uint8_t terminal;
+    uint8_t skip_len;
+    unsigned char label[16];
 } Node;
 
 typedef struct NodePool {
@@ -91,23 +93,83 @@ static int parse_prefix(char *text, unsigned char address[16], int *bits,
     return family;
 }
 
-static void insert(uint32_t root, const unsigned char address[16], int bits) {
-    uint32_t index = root;
-    Node *node = node_at(root);
-    for (int bit = 0; bit < bits; bit++) {
-        int value = (address[bit / 8] >> (7 - bit % 8)) & 1;
-        uint32_t child = node->child[value];
-        if (!child) {
+static int get_bit(const unsigned char address[16], int bit) {
+    return (address[bit / 8] >> (7 - bit % 8)) & 1;
+}
+
+static void clear_bits(unsigned char address[16], int start, int end) {
+    for (int bit = start; bit < end; bit++)
+        address[bit / 8] &= (unsigned char)~(1u << (7 - bit % 8));
+}
+
+static void set_label(Node *node, const unsigned char address[16], int bits) {
+    node->skip_len = (uint8_t)bits;
+    memcpy(node->label, address, sizeof(node->label));
+}
+
+static uint32_t insert_at(uint32_t index, const unsigned char address[16],
+                          int bits, int depth) {
+    Node *node = node_at(index);
+    int matched = 0;
+    int prefix_depth = depth + node->skip_len;
+
+    while (matched < node->skip_len && depth + matched < bits &&
+           get_bit(node->label, depth + matched) ==
+               get_bit(address, depth + matched))
+        matched++;
+
+    if (matched < node->skip_len) {
+        int split_depth = depth + matched;
+        int old_branch = get_bit(node->label, split_depth);
+        uint32_t split_index = new_node();
+        Node *split = node_at(split_index);
+
+        set_label(split, address, matched);
+        split->child[old_branch] = index;
+        node = node_at(index);
+        node->skip_len = (uint8_t)(node->skip_len - matched - 1);
+
+        if (bits == split_depth) {
+            split->terminal = 1;
+        } else {
+            int new_branch = get_bit(address, split_depth);
+            uint32_t new_index = new_node();
+            Node *new_child = node_at(new_index);
+            split = node_at(split_index);
+            set_label(new_child, address, bits - split_depth - 1);
+            new_child->terminal = 1;
+            split->child[new_branch] = new_index;
+        }
+        return split_index;
+    }
+
+    if (bits == prefix_depth) {
+        node->terminal = 1;
+        node->child[0] = node->child[1] = 0;
+        return index;
+    }
+    if (node->terminal) return index;
+
+    {
+        int branch = get_bit(address, prefix_depth);
+        uint32_t child = node->child[branch];
+        if (child) {
+            child = insert_at(child, address, bits, prefix_depth + 1);
+            node = node_at(index);
+            node->child[branch] = child;
+        } else {
             child = new_node();
             node = node_at(index);
-            node->child[value] = child;
+            node->child[branch] = child;
+            set_label(node_at(child), address, bits - prefix_depth - 1);
+            node_at(child)->terminal = 1;
         }
-        index = child;
-        node = node_at(index);
-        if (node->terminal) return;
     }
-    node->terminal = 1;
-    node->child[0] = node->child[1] = 0;
+    return index;
+}
+
+static void insert(uint32_t root, const unsigned char address[16], int bits) {
+    insert_at(root, address, bits, 0);
 }
 
 /* Compact bottom-up and return whether this subtree is completely covered. */
@@ -148,25 +210,40 @@ static CompactResult compact(uint32_t index, unsigned char address[16],
     CompactResult left, right;
     Node *node;
     size_t output_start = output->count;
+    int prefix_depth;
 
     if (!index) return (CompactResult){0};
     node = node_at(index);
+    prefix_depth = depth + node->skip_len;
+    for (int bit = depth; bit < prefix_depth; bit++) {
+        if (get_bit(node->label, bit))
+            address[bit / 8] |= (unsigned char)(1u << (7 - bit % 8));
+        else
+            address[bit / 8] &= (unsigned char)~(1u << (7 - bit % 8));
+    }
     if (node->terminal) {
-        append_output(output, address, depth);
-        return (CompactResult){1};
+        append_output(output, address, prefix_depth);
+        clear_bits(address, depth, prefix_depth);
+        return (CompactResult){node->skip_len == 0};
     }
 
-    left = compact(node->child[0], address, depth + 1, output);
-    address[depth / 8] |= (unsigned char)(1u << (7 - depth % 8));
-    right = compact(node->child[1], address, depth + 1, output);
-    address[depth / 8] &= (unsigned char)~(1u << (7 - depth % 8));
+    address[prefix_depth / 8] &=
+        (unsigned char)~(1u << (7 - prefix_depth % 8));
+    left = compact(node->child[0], address, prefix_depth + 1, output);
+    address[prefix_depth / 8] |=
+        (unsigned char)(1u << (7 - prefix_depth % 8));
+    right = compact(node->child[1], address, prefix_depth + 1, output);
+    address[prefix_depth / 8] &=
+        (unsigned char)~(1u << (7 - prefix_depth % 8));
     if (left.full && right.full) {
         node->terminal = 1;
         node->child[0] = node->child[1] = 0;
         output->count = output_start;
-        append_output(output, address, depth);
-        return (CompactResult){1};
+        append_output(output, address, prefix_depth);
+        clear_bits(address, depth, prefix_depth);
+        return (CompactResult){node->skip_len == 0};
     }
+    clear_bits(address, depth, prefix_depth);
     return (CompactResult){0};
 }
 
