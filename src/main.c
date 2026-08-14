@@ -10,20 +10,37 @@ typedef struct Node {
     int terminal;
 } Node;
 
+enum { NODE_CHUNK_SIZE = 4096 };
+
+typedef struct NodeChunk {
+    Node nodes[NODE_CHUNK_SIZE];
+    size_t used;
+    struct NodeChunk *next;
+} NodeChunk;
+
+static NodeChunk *node_chunks;
+
 static Node *new_node(void) {
-    Node *node = calloc(1, sizeof(*node));
-    if (!node) {
-        perror("calloc");
-        exit(EXIT_FAILURE);
+    NodeChunk *chunk = node_chunks;
+
+    if (!chunk || chunk->used == NODE_CHUNK_SIZE) {
+        chunk = calloc(1, sizeof(*chunk));
+        if (!chunk) {
+            perror("calloc");
+            exit(EXIT_FAILURE);
+        }
+        chunk->next = node_chunks;
+        node_chunks = chunk;
     }
-    return node;
+    return &chunk->nodes[chunk->used++];
 }
 
-static void free_tree(Node *node) {
-    if (!node) return;
-    free_tree(node->child[0]);
-    free_tree(node->child[1]);
-    free(node);
+static void free_node_chunks(void) {
+    while (node_chunks) {
+        NodeChunk *next = node_chunks->next;
+        free(node_chunks);
+        node_chunks = next;
+    }
 }
 
 static int parse_prefix(char *text, unsigned char address[16], int *bits,
@@ -72,8 +89,6 @@ static void insert(Node *root, const unsigned char address[16], int bits) {
         if (node->terminal) return;
     }
     node->terminal = 1;
-    free_tree(node->child[0]);
-    free_tree(node->child[1]);
     node->child[0] = node->child[1] = NULL;
 }
 
@@ -87,8 +102,6 @@ static int compact(Node *node) {
     left_full = compact(node->child[0]);
     right_full = compact(node->child[1]);
     if (left_full && right_full) {
-        free_tree(node->child[0]);
-        free_tree(node->child[1]);
         node->child[0] = node->child[1] = NULL;
         node->terminal = 1;
         return 1;
@@ -184,7 +197,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "input entries: %zu\noutput entries: %zu\ncompression: %.2f%%\n",
                 input_entries, output_entries, reduction);
     }
-    free_tree(ipv4);
-    free_tree(ipv6);
+    free_node_chunks();
     return EXIT_SUCCESS;
 }
