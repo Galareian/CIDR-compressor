@@ -77,6 +77,23 @@ static void insert(Node *root, const unsigned char address[16], int bits) {
     node->child[0] = node->child[1] = NULL;
 }
 
+static int is_full(const Node *node) {
+    return node && (node->terminal ||
+                    (is_full(node->child[0]) && is_full(node->child[1])));
+}
+
+static void compact(Node *node) {
+    if (!node || node->terminal) return;
+    compact(node->child[0]);
+    compact(node->child[1]);
+    if (is_full(node->child[0]) && is_full(node->child[1])) {
+        free_tree(node->child[0]);
+        free_tree(node->child[1]);
+        node->child[0] = node->child[1] = NULL;
+        node->terminal = 1;
+    }
+}
+
 static void print_tree(const Node *node, unsigned char address[16], int depth,
                        int max_bits) {
     char text[INET6_ADDRSTRLEN];
@@ -139,6 +156,8 @@ int main(int argc, char **argv) {
 
     if (ferror(input)) perror("read");
     if (input != stdin) fclose(input);
+    compact(ipv4);
+    compact(ipv6);
     {
         unsigned char address[16] = {0};
         print_tree(ipv4, address, 0, 32);
