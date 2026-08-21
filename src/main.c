@@ -47,7 +47,7 @@ static void free_nodes(void) {
 }
 
 static int parse_prefix(char *text, unsigned char address[16], int *bits,
-                        int *max_bits) {
+                        int *max_bits, int max_prefix) {
     char *slash = strchr(text, '/');
     int family;
 
@@ -75,7 +75,7 @@ static int parse_prefix(char *text, unsigned char address[16], int *bits,
     }
 
     if (*bits < 0) *bits = *max_bits;
-    if (*bits > *max_bits) return 0;
+    if (*bits > *max_bits || (slash && *bits > max_prefix)) return 0;
     if (family == AF_INET) memset(address + 4, 0, 12);
 
     {
@@ -206,7 +206,7 @@ static void append_output(OutputList *output, const unsigned char address[16],
 }
 
 static CompactResult compact(uint32_t index, unsigned char address[16],
-                             int depth, OutputList *output) {
+                             int depth, OutputList *output, int max_prefix) {
     CompactResult left, right;
     Node *node;
     size_t output_start = output->count;
@@ -229,13 +229,15 @@ static CompactResult compact(uint32_t index, unsigned char address[16],
 
     address[prefix_depth / 8] &=
         (unsigned char)~(1u << (7 - prefix_depth % 8));
-    left = compact(node->child[0], address, prefix_depth + 1, output);
+    left = compact(node->child[0], address, prefix_depth + 1, output,
+                   max_prefix);
     address[prefix_depth / 8] |=
         (unsigned char)(1u << (7 - prefix_depth % 8));
-    right = compact(node->child[1], address, prefix_depth + 1, output);
+    right = compact(node->child[1], address, prefix_depth + 1, output,
+                    max_prefix);
     address[prefix_depth / 8] &=
         (unsigned char)~(1u << (7 - prefix_depth % 8));
-    if (left.full && right.full) {
+    if (left.full && right.full && prefix_depth <= max_prefix) {
         node->terminal = 1;
         node->child[0] = node->child[1] = 0;
         output->count = output_start;
@@ -266,25 +268,51 @@ int main(int argc, char **argv) {
     char line[512];
     int line_number = 0;
     int stats = 0;
+    int max_prefix = 128;
     size_t input_entries = 0;
     size_t output_entries;
     OutputList ipv4_output = {0};
     OutputList ipv6_output = {0};
 
-    if (argc > 1 && strcmp(argv[1], "--stats") == 0) {
-        stats = 1;
-        argv++;
-        argc--;
-    }
-    if (argc > 2) {
-        fprintf(stderr, "usage: %s [--stats] [input-file]\n", argv[0]);
-        return EXIT_FAILURE;
-    }
-    if (argc == 2) {
-        input = fopen(argv[1], "r");
-        if (!input) {
-            perror(argv[1]);
+    {
+        int argument = 1;
+        while (argument < argc) {
+            if (strcmp(argv[argument], "--stats") == 0) {
+                stats = 1;
+                argument++;
+            } else if (strcmp(argv[argument], "--max-prefix") == 0 &&
+                       argument + 1 < argc) {
+                char *end;
+                long value = strtol(argv[argument + 1], &end, 10);
+                if (*argv[argument + 1] == '\0' || *end || value < 0 || value > 128) {
+                    fprintf(stderr, "invalid maximum prefix length: %s\n",
+                            argv[argument + 1]);
+                    return EXIT_FAILURE;
+                }
+                max_prefix = (int)value;
+                argument += 2;
+            } else if (strncmp(argv[argument], "--max-prefix=", 13) == 0) {
+                char *end;
+                long value = strtol(argv[argument] + 13, &end, 10);
+                if (argv[argument][13] == '\0' || *end || value < 0 || value > 128) {
+                    fprintf(stderr, "invalid maximum prefix length: %s\n",
+                            argv[argument] + 13);
+                    return EXIT_FAILURE;
+                }
+                max_prefix = (int)value;
+                argument++;
+            } else break;
+        }
+        if (argc - argument > 1) {
+            fprintf(stderr, "usage: %s [--stats] [--max-prefix x] [input-file]\n", argv[0]);
             return EXIT_FAILURE;
+        }
+        if (argc - argument == 1) {
+            input = fopen(argv[argument], "r");
+        if (!input) {
+            perror(argv[argument]);
+            return EXIT_FAILURE;
+        }
         }
     }
 
@@ -299,7 +327,7 @@ int main(int argc, char **argv) {
         if (comment) *comment = '\0';
         start[strcspn(start, " \t\r\n")] = '\0';
         if (!*start) continue;
-        family = parse_prefix(start, address, &bits, &max_bits);
+        family = parse_prefix(start, address, &bits, &max_bits, max_prefix);
         if (!family) {
             fprintf(stderr, "invalid address on line %d: %s\n", line_number, start);
             continue;
@@ -312,9 +340,9 @@ int main(int argc, char **argv) {
     if (input != stdin) fclose(input);
     {
         unsigned char address[16] = {0};
-        compact(ipv4, address, 0, &ipv4_output);
+        compact(ipv4, address, 0, &ipv4_output, max_prefix);
         memset(address, 0, sizeof(address));
-        compact(ipv6, address, 0, &ipv6_output);
+        compact(ipv6, address, 0, &ipv6_output, max_prefix);
     }
     output_entries = ipv4_output.count + ipv6_output.count;
     print_outputs(&ipv4_output, 32);

@@ -54,4 +54,20 @@ else
 fi
 echo 'PASS: invalid input warning'
 
+max_prefix_actual="$tmpdir/max-prefix.actual"
+printf '2001:db8::1\n2001:db8::2\n' | "$program" --max-prefix 64 > "$max_prefix_actual"
+printf '%s\n' '2001:db8::1' '2001:db8::2' > "$tmpdir/max-prefix.expected"
+if ! diff -u "$tmpdir/max-prefix.expected" "$max_prefix_actual"; then
+	echo 'FAIL: maximum prefix length' >&2
+	exit 1
+fi
+echo 'PASS: maximum prefix length'
+
+printf '%s\n' '2001:db8::/65' | "$program" --max-prefix 64 > /dev/null 2>"$tmpdir/max-prefix.err"
+if ! grep -q 'invalid address' "$tmpdir/max-prefix.err"; then
+	echo 'FAIL: maximum prefix validation' >&2
+	exit 1
+fi
+echo 'PASS: maximum prefix validation'
+
 echo 'All tests passed.'

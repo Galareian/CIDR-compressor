@@ -26,10 +26,17 @@ Basic usage:
 
 # read from stdin
 cat input.txt | ./bin/cidr-compressor > compressed.txt
+
+# keep generated CIDR ranges at /64 or shorter (individual IPs are retained)
+./bin/cidr-compressor --max-prefix 64 input.txt
 ```
 
 Input supports single IPv4/IPv6 addresses and CIDR ranges (one per line).
 Lines starting with `#` and blank lines are ignored.
+
+Use `--max-prefix x` (or `--max-prefix=x`) to set the maximum prefix length
+for CIDR ranges in the output. Explicit input ranges longer than this limit
+are rejected; individual IP addresses are still preserved as individual IPs.
 
 Example input:
 
